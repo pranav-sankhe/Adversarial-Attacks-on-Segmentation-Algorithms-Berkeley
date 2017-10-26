@@ -28,6 +28,48 @@ epilson_limit = 10                  #all values of perturbation above this will 
 sum_loss_gradient_sum = []          #sum of gradients of loss function of all images which will be divided by number of images to find the avg.   
 count = 0                           #variable to count number of training images             
 n_of_iterations = 200               #number of iterations for the iterative step to calculate the universal perturbations. 
+excluded_labels = [24]               #enter the ID[or IDs] of the objects you want to remove from the segmentation results. 24 corresponds to 'person'                    
+
+
+def genYtarget(array):              #implementing Dynamic target segmentation
+    array = np.array(array)        
+
+    allindices_array = []            #define array to store all the indices of the input array    
+
+    for i in range(array.shape[1]):
+        for j in range(array.shape[2]):
+            allindices_array.append([i,j])
+
+
+    for excluded_item in excluded_labels:
+        exclude_indices = np.argwhere(array==excluded_item)     #check which pixel is labeled as the excluded label
+        exclude_indices = exclude_indices[:,[1,2]]              #convert the excluded indices in (x,y) format                             
+        included_indices = []                                   #array which stores the indices of the allowed labels                
+        
+        #prepare the included index list 
+        for x in allindices_array:      
+            dist = []                                                                                        
+            for y in exclude_indices:
+                dist.append(np.linalg.norm(x-y))                #check if the indice is equal to the one in the excluded index list
+                states = [0]
+                mask = np.in1d(dist, states)
+            if np.any(mask == True):                                            
+                pass
+            else:
+                included_indices.append(x)  
+        
+        # check the nearest neighbour for each excluded index and fill in the array with the nearest neighbour
+        for x in exclude_indices:
+            dist = []                                            #store the distances   
+            for y in included_indices:
+                dist.append(np.linalg.norm(x-y))                 
+            min_index_temp = np.argmin(dist)                       
+            min_index = included_indices[min_index_temp]              # find the index of the closest pixel  
+            array[0,x[0],x[1]] = array[0, min_index[0], min_index[1]]    
+
+
+        return array
+
 
 def fill_up_weights(up):
     w = up.weight.data
@@ -153,8 +195,8 @@ def genAdv(args):
     if args.pretrained:                                                         #load pretrained model    
         single_model.load_state_dict(torch.load(args.pretrained))
     model = torch.nn.DataParallel(single_model).cuda()
-    
-    criterion = nn.NLLLoss2d(ignore_index=255)                                  #define loss
+    # array = np.ndarray.tolist(np.append(np.arange(19,34), [-1]))
+    criterion = nn.NLLLoss2d(ignore_index=-1)                                  #define loss
     criterion.cuda()
 
     #load data
@@ -184,14 +226,16 @@ def genAdv(args):
     end = time.time()
 
     for i, (input, target) in enumerate(val_loader):
+        print (target, type(target))
+        target = target.numpy()
+        target = genYtarget(target)
+        print(target,type(target))
         if type(criterion) in [torch.nn.modules.loss.L1Loss,
                                torch.nn.modules.loss.MSELoss]:
             target = target.float()
-        target = target.float()
-
         input = input.cuda()
         target = target.cuda(async=True)
-        
+
         input_var = torch.autograd.Variable(input,requires_grad=True)
         target_var = torch.autograd.Variable(target)
         
@@ -199,7 +243,7 @@ def genAdv(args):
         loss = criterion(output, target_var)         # calculate the loss pixel by pixel    
         
         loss_gradient = loss.backward()              #calculate the gradient of loss fucntion w.r.t input   
-        loss_gradient = loss_gradient.cpu().data.numpy()  # convert to 2D numpy array
+        loss_gradient = loss_gradient.cpu().data.np()  # convert to 2D numpy array
 
         sum_loss_gradient_sum = np.add(sum_loss_gradient_sum,loss_gradient_sum)         #sum over all the images
         count = count + 1                                                               #count number of images
