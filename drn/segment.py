@@ -158,6 +158,7 @@ def validate(val_loader, model, criterion, eval_score=None, print_freq=10):
         target_var = torch.autograd.Variable(target, volatile=True)
 
         # compute output
+        print ("computing output")
         output = model(input_var)[0]
         loss = criterion(output, target_var)
 
